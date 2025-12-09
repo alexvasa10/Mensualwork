@@ -74,6 +74,7 @@ function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [showPropinas, setShowPropinas] = useState(true);
   const [allData, setAllData] = useState<TimesheetData>({});
+  const [hasLoadedData, setHasLoadedData] = useState(false);
   const [showAnnualSummary, setShowAnnualSummary] = useState(false);
   const [showPdfExport, setShowPdfExport] = useState(false);
   const [pdfStartDate, setPdfStartDate] = useState('');
@@ -167,29 +168,47 @@ function App() {
       }
     });
 
-    if (Object.keys(startMonthData).length > 0) {
-      const existing = localStorage.getItem(`timesheet-${range.startMonthKey}`);
-      const merged = { ...JSON.parse(existing || '{}'), ...startMonthData };
-      localStorage.setItem(`timesheet-${range.startMonthKey}`, JSON.stringify(merged));
-    }
+    const mergeAndPersist = (
+      key: string,
+      newData: TimesheetData,
+      shouldKeepEntry: (dayNum: number) => boolean,
+    ) => {
+      const existingRaw = localStorage.getItem(key);
+      const existing = existingRaw ? (JSON.parse(existingRaw) as TimesheetData) : {};
 
-    if (Object.keys(endMonthData).length > 0) {
-      const existing = localStorage.getItem(`timesheet-${range.endMonthKey}`);
-      const merged = { ...JSON.parse(existing || '{}'), ...endMonthData };
-      localStorage.setItem(`timesheet-${range.endMonthKey}`, JSON.stringify(merged));
-    }
+      const filteredExisting = Object.keys(existing).reduce((acc: TimesheetData, dateStr: string) => {
+        const dayNum = parseInt(dateStr.split('-')[2]);
+        if (shouldKeepEntry(dayNum)) {
+          acc[dateStr] = existing[dateStr];
+        }
+        return acc;
+      }, {});
+
+      const merged = { ...filteredExisting, ...newData };
+
+      if (Object.keys(merged).length === 0) {
+        localStorage.removeItem(key);
+      } else {
+        localStorage.setItem(key, JSON.stringify(merged));
+      }
+    };
+
+    mergeAndPersist(`timesheet-${range.startMonthKey}`, startMonthData, dayNum => dayNum < CUTOFF_DAY);
+    mergeAndPersist(`timesheet-${range.endMonthKey}`, endMonthData, dayNum => dayNum >= CUTOFF_DAY);
   };
 
   useEffect(() => {
+    setHasLoadedData(false);
     const fiscalData = loadFiscalMonthData(currentDate);
     setAllData(fiscalData);
+    setHasLoadedData(true);
   }, [currentDate]);
 
   useEffect(() => {
-    if (Object.keys(allData).length > 0) {
-      saveFiscalMonthData(currentDate, allData);
-    }
-  }, [allData, currentDate]);
+    if (!hasLoadedData) return;
+
+    saveFiscalMonthData(currentDate, allData);
+  }, [allData, currentDate, hasLoadedData]);
 
   useEffect(() => {
     if (darkMode) {
